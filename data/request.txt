@@ -1,0 +1,11 @@
+Original Request
+7/24/2020
+
+We are working on a joint-study where we collected a bunch of field profiles with an EXO2 and a set Chl-a samples at discrete depths from Skaneateles and Canandaigua lakes. We auto-logged the EXO2 at 10 s intervals and lowered the unit slowly through the water column, surface to bottom at several sites per trip for multiple trips last summer. We are now in the position of trying to pair the field and lab datasets for comparison and for correcting the field probes. But, the EXO2 depths are at non-consistent intervals and the lab samples are at the nearest meter. We would like to maintain the original EXO2 depth resolution as there is some neat stuff that happens at a fine depth scale.
+
+(1)
+I’ve tried merging to the closest depth value but can’t get it to work. Any thoughts? Attached is an EXO2 example with depths to the nearest 0.1m if that helps and chemistry to the nearest meter
+
+(2)
+Have you had any experience interpolating in R? Our pie-in-the-sky dream would be to have the field data have a measurement at every 0.1m depth from surface to bottom at each site with missing filed values interpolated from the data above/below in the profile. This seems very complicated (at least for me).
+
