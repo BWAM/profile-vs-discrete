@@ -1,21 +1,26 @@
 ---
-title: "Untitled"
+title: "Profile vs Discrete Samples"
 author: "Zachary M. Smith"
 date: "7/27/2020"
 output: html_document
 ---
 
+```{r, echo=FALSE}
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.height = 40)
+```
+
 # Goals
 
-
+1. Join the profile data to the discrete data based on nearest depth.
+2. Interpolate results to estimate a measurement at every 0.1 meter depth.
 
 # Setup
 
 Load the necessary R packages into the environment.
-```{r}
-suppressPackageStartupMessages(
-  library(dplyr)
-)
+```{r, message=FALSE}
+library(tidyverse)
+library(here)
 ```
 
 Establish dynamic file path to the R project folder.
@@ -25,6 +30,7 @@ root_dir <- here::here()
 
 # Load Data
 
+Load in data stored as a CSV file.
 ```{r}
 # Load profile data
 profile_df <- read.csv(file = file.path(root_dir,
@@ -41,6 +47,7 @@ discrete_df <- read.csv(file = file.path(root_dir,
 
 # Data Wrangling
 
+Below are various steps for standardizing discrete and profile data sets. 
 ```{r}
 # DISCRETE DATA----------------------------------------------------------------
 # Keep only the rows that represent true water samples (WS). Remove QA samples.
@@ -48,156 +55,191 @@ discrete_df <- discrete_df[discrete_df$Type %in% "WS", ]
 # Convert the date to a date type.
 discrete_df$Date <- as.Date(discrete_df$Date, "%m/%d/%y")
 # Create a unique sampling event ID
-discrete_df$event_id <- paste(discrete_df$Site,
+discrete_df$Event_id <- paste(discrete_df$Site,
                               discrete_df$Date,
                               sep = "_")
 # Ensure that depth is numeric
 discrete_df$Depth <- as.numeric(discrete_df$Depth)
+# Remove unnecessary columns
+discrete_df <- discrete_df[!names(discrete_df) %in% c("ID",
+                                                      "Position",
+                                                      "Type")]
+
 # PROFILE DATA-----------------------------------------------------------------
 # Convert the date to a date type.
 profile_df$Date <- as.Date(profile_df$Date, "%m/%d/%y")
 # Create a unique sampling event ID
-profile_df$event_id <- paste(profile_df$Site,
+profile_df$Event_id <- paste(profile_df$Site,
                              profile_df$Date,
                              sep = "_")
 # Use "Depth" as the standard name.
 profile_df$Depth <- profile_df$Depth_tenth_m
+# Remove unnecessary columns.
+profile_df <- profile_df[!names(profile_df) %in% c("Time",
+                                                  "Depth_tenth_m",
+                                                  "Depth_m")]
 ```
 
 # Functions
 
-
-
-
 ```{r}
-#' Complete Depth Sequence
+#' Complete the Depth Profile
 #'
-#' @param .depth_vec a vector of depth values.
-#' @param .by a single numeric value representing the increment of a sequence. 
+#' @param .x a data frame.
+#' @param .depth the name of the depth column unquoted.
+#' @param ... column names unquoted that will be used to 
+#' aggregate (group) the data.
 #'
-#' @return a numeric vector representing a complete depth sequence.
+#' @return a data frame.
+#' @export
 
-depth_seq <- function(.depth_vec, .by = 0.1) {
-  # Find the max depth to inform the seq.
-  max_scalar <- max(.depth_vec,
-                    na.rm = TRUE)
-  # Create a sequence from 0 to the max determined above.
-  seq(from = 0,
-      to = max_scalar,
-      by = .by)
-}
-```
-
-```{r}
-
-#' Create a Complete Depth Profile
-#'
-#' @param .profile_df a data frame containing profile data.
-#' @param .discrete_df a data frame containing discrete data.
-#' @param .depth_col the name of the Depth column in .profile_df and .discrete_df.
-#' @param .quite a logical vector indicating if messages should be printed (TRUE)
-#' or not (FALSE).
-#' @inheritParams depth_seq
-#'
-#' @return a data frame with a complete depth profile.
-
-depth_complete <- function(.profile_df, .discrete_df,
-                           .depth_col = "Depth", .by = 0.1,
-                           .quite) {
-  # Create a DF where each row represents a depth at a specified interval.
-  depth_df <- data.frame(
-    # .profile_df is used because it most likely contains the deepest depth
-    # observed between the two DFs.
-    depth_seq(.depth_vec = .profile_df[.depth_col],
-              .by = .by)
-  )
-  # Rename the depth column based on the supplied .depth_col.
-  names(depth_df) <- .depth_col
-  # Identify which column names are shared between the two DFs. 
-  # Will be used to merge by.
-  shared_names <- names(.profile_df)[names(.profile_df) %in% names(.discrete_df)]
-  
-  data.frame(unique(.profile_df[shared_names]))
-  # Join the profile DF with the new Depth DF to create a complete
-  # depth profile.
-  pro_depth_df <- merge(x = .profile_df,
-                  y = depth_df,
-                  by = .depth_col,
-                  all = TRUE)
-  
-  # Indicate which column names will be used to merge the DFs.
-  if (.quite != TRUE) message("Merging by: ", paste(shared_names, collapse = ", "))
-  # Join the discrete DF with the complete depth profile DF 
-  # using the shared names vector.
-  final_df <- merge(x = .discrete_df,
-                    y = pro_depth_df,
-                    by = shared_names,
-                    all = TRUE)
-  # Arrange the DF rows based on the depth.
-  final_df <- final_df[order(final_df$Depth), ]
-  # Return a DF.
-  return(final_df)
-}
-```
-
-
-```{r}
 depth_complete <- function(.x, .depth, ...) {
   .x %>% 
   dplyr::group_by(...) %>% 
   tidyr::complete({{.depth}} := seq(from = 0,
-                              to = max({{.depth}}, na.rm = TRUE),
+                              to = max({{.depth}},
+                                       na.rm = TRUE),
                               by = 0.1)) %>% 
     dplyr::ungroup()
 }
+```
+
+```{r}
+#' Linear Interpolate
+#'
+#' @param .x a vector of numeric values that will provide the increment of interpolation.
+#' @param .y a vector of numeric values to be interpolated.
+#' @param .quite a logical value indicating if a warning should be printed (FALSE) or not 
+#' (TRUE).
+#' @return a numeric vector.
+
+interpolate <- function(.x, .y, .event, .quite = FALSE) {
+  x_length <- length(.x[!is.na(.x)])
+  y_length <- length(.y[!is.na(.y)])
+  
+  if (x_length >= 2 & y_length >= 2) {
+    approx(x = .x,
+           y = .y,
+           xout = .x,
+           method = "linear")$y
+  } else {
+    if (!.quite) warning(
+      # When using dplyr::across() to call this function, this message is less
+      # informative. It will print ".x" instead of the column name representing .y.
+      paste0(unique(.event), "(", deparse(substitute(.y)),  ") \n",
+             "\t One of the supplied values had less than 2 values. \n",
+             "\t .x (", deparse(substitute(.x)), ") length = ", x_length, "\n",
+             "\t .y (", deparse(substitute(.y)), ") length = ", y_length, "\n",
+             "\t The original .y values will be returned. \n"))
+    .y
+  }
+}
+```
+
+# Complete the Depth Profile
 
 
+```{r}
+# Apply depth_complete to both profile_df and discrete_df
 cdepth_df <- purrr::map(list(profile_df, discrete_df), function(df_i) {
   depth_complete(.x = df_i,
                  .depth = Depth,
-                 event_id,
+                 Event_id,
                  Lake,
                  Site,
                  Date)
 }) %>% 
-  purrr::reduce(.f = full_join)
-
-
-test <- cdepth_df %>% 
-  # filter(event_id %in% "CGLT(1)_2019-05-08") %>% 
-  group_by(event_id) %>%
-    arrange(Depth) %>%
-      mutate(ip.value = approx(x = Depth,
-                               y = pH,
-                               xout = Depth)$y) 
-
+  # Join/merge the results
+  # Makes a single DF containing both profile and discrete data
+  purrr::reduce(.f = full_join, 
+                by = c("Event_id",
+                       "Lake",
+                       "Site",
+                       "Date",
+                       "Depth")) %>% 
+  # Transform the data from a wide- to long-format
+  tidyr::pivot_longer(
+    # Pivot by all columns except the ones listed in !all_of()
+    cols = !all_of(c("Event_id",
+                     "Lake",
+                     "Site",
+                     "Date",
+                     "Depth")),
+    # Column names will be placed in the "Parameter" column
+    names_to = "Parameter",
+    # Values from each column, corresponding with the "Parameter" column,
+    # will be placed in the "Value" column
+    values_to = "Value"
+  )
 ```
-
-```{r}
-event_vec <- unique(c(.profile_df$event_id,
-                      .discrete_df$event_id))
-
-comp_depth_list <- lapply(event_vec, function(event_i) {
-  depth_complete(.profile_df = profile_df[profile_df$event_id %in% event_i, ],
-                 .discrete_df = discrete_df[discrete_df$event_id %in% event_i, ],
-                 .depth_col = "Depth",
-                 .by = 0.1,
-                 .quite = TRUE)
-})
-
-comp_depth_df <- do.call(rbind, comp_depth_list)
-
-```
-
 
 # Interpolation
 
+```{r}
+interp_df <- cdepth_df %>% 
+  # Aggregate the data by Event_id and Parameter
+  dplyr::group_by(Event_id, Parameter) %>%
+  # Order the data based on Depth
+  dplyr::arrange(Event_id, Parameter, Depth) %>%
+  # Apply linear interpolation
+  dplyr::mutate(interp_value = interpolate(.x = Depth,
+                                           .y = Value,
+                                           .event = Event_id,
+                                           .quite = TRUE),
+                # Identify when the value is interpolated (TRUE) or not (FALSE)
+                Interpolated = is.na(Value) & !is.na(interp_value)) %>% 
+  # Remove the aggregation created by group_by()
+  dplyr::ungroup() %>% 
+  # Drop the Value column
+  # No longer necessary the Interpolated (logical) column indicates which 
+  # values are interpolated and which are not.
+  dplyr::select(-Value) %>% 
+  # Rename the interp_value column to Value
+  dplyr::rename(Value = interp_value)
+```
 
+```{r, fig.width=8, fig.height=40}
+#' A Facet Wrapped Plot of Parameter Depth Profile
+#'
+#' @param .x a data frame.
+#' @param .event a string representing an event ID.
+#'
+#' @return a facet wrapped plot.
+
+profile_plot <- function(.x, .event) {
+  interp_sub <- interp_df %>% 
+  filter(Event_id %in% .event) 
+  
+  interp_sub %>%
+  ggplot(aes(y = Value,
+             x = -Depth,
+             color = Interpolated,
+             fill = Interpolated,
+             group = Parameter)) +
+  geom_line(size = 1) +
+  # geom_point() +
+  theme_bw() +
+  coord_flip() +
+  scale_color_manual(values = c("TRUE" = "#E69F00", 
+                                "FALSE" = "#56B4E9")) +
+  # geom_point(data = filter(interp_sub, Interpolated == FALSE),
+  #            alpha = 0.5) +
+  geom_rug(data = filter(interp_sub,
+                         Interpolated == FALSE,
+                         !is.na(Value))) +
+  facet_wrap(~Event_id + Parameter,
+             scales = "free",
+             ncol = 1)
+}
+```
 
 ```{r}
-depth_df <- data.frame(
-  Depth = complete_depth(.depth_vec = prof)
-)
+
+profile_plot(.x = interp_df,
+             .event = .x)
 ```
+
+
+
 
 
