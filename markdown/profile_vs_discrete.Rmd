@@ -1,13 +1,16 @@
 ---
 title: "Profile vs Discrete Samples"
 author: "Zachary M. Smith"
-date: "7/27/2020"
-output: html_document
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
 ---
 
-```{r, echo=FALSE}
+```{r setup, echo=FALSE}
 knitr::opts_chunk$set(fig.width = 8,
-                      fig.height = 40)
+                      fig.height = 8)
 ```
 
 # Goals
@@ -18,20 +21,20 @@ knitr::opts_chunk$set(fig.width = 8,
 # Setup
 
 Load the necessary R packages into the environment.
-```{r, message=FALSE}
+```{r load-packages, message=FALSE}
 library(tidyverse)
 library(here)
 ```
 
 Establish dynamic file path to the R project folder.
-```{r}
+```{r root-dir}
 root_dir <- here::here()
 ```
 
 # Load Data
 
 Load in data stored as a CSV file.
-```{r}
+```{r load-data}
 # Load profile data
 profile_df <- read.csv(file = file.path(root_dir,
                                         "data",
@@ -48,8 +51,10 @@ discrete_df <- read.csv(file = file.path(root_dir,
 # Data Wrangling
 
 Below are various steps for standardizing discrete and profile data sets. 
-```{r}
-# DISCRETE DATA----------------------------------------------------------------
+
+## Discrete Data
+
+```{r discrete-wrangling}
 # Keep only the rows that represent true water samples (WS). Remove QA samples.
 discrete_df <- discrete_df[discrete_df$Type %in% "WS", ]
 # Convert the date to a date type.
@@ -64,8 +69,15 @@ discrete_df$Depth <- as.numeric(discrete_df$Depth)
 discrete_df <- discrete_df[!names(discrete_df) %in% c("ID",
                                                       "Position",
                                                       "Type")]
+# Remove periods from column names.
+discrete_df <- discrete_df %>% 
+  rename(FP_Chla = "FPChl.a",
+         Lab_Chla = "Lab.Chl.a")
+```
 
-# PROFILE DATA-----------------------------------------------------------------
+## Profile Data
+
+```{r profile-wrangling}
 # Convert the date to a date type.
 profile_df$Date <- as.Date(profile_df$Date, "%m/%d/%y")
 # Create a unique sampling event ID
@@ -82,7 +94,12 @@ profile_df <- profile_df[!names(profile_df) %in% c("Time",
 
 # Functions
 
-```{r}
+Standardized methods for wrangling data and creating plots.
+
+## Data Wrangling Functions
+
+### Depth Complete
+```{r depth-complete-fun}
 #' Complete the Depth Profile
 #'
 #' @param .x a data frame.
@@ -104,7 +121,9 @@ depth_complete <- function(.x, .depth, ...) {
 }
 ```
 
-```{r}
+### Interplolate
+
+```{r interpolate-fun}
 #' Linear Interpolate
 #'
 #' @param .x a vector of numeric values that will provide the increment of interpolation.
@@ -136,27 +155,201 @@ interpolate <- function(.x, .y, .event, .quite = FALSE) {
 }
 ```
 
+### chla_prep
+
+```{r chla-prep}
+#' Wrangle the Chlorophyll-a Data
+#'
+#' @param .x a data frame.
+#' @param .event a string representing an event ID.
+#'
+#' @return a data frame.
+
+chla_prep <- function(.x, .event) {
+  cdepth_sub <- .x %>% 
+  filter(Event_id %in% .event,
+         Parameter %in% "Chla") %>% 
+  dplyr::select(-Parameter) %>% 
+  tidyr::pivot_longer(
+    cols = c("Value", 
+             "Lab_Chla",
+             "FP_Chla"),
+    names_to = "Parameter",
+    values_to = "Value"
+  ) %>% 
+  mutate(Parameter = if_else(Parameter %in% "Value",
+                             "InSitu_Chla",
+                             Parameter))
+}
+```
+
+## Plotting Functions
+
+### Chla_plot
+
+```{r chla-plots-fun, fig.height=6, warning=FALSE}
+#' Chlorophyll-a Plots
+#'
+#' @param .x a data frame.
+#' @param .event a string representing an event ID.
+#'
+#' @return a plot.
+
+chla_plot <- function(.x, .event) {
+  chla_df <- chla_prep(.x = .x,
+                       .event = .event)
+  
+  chla_df %>% 
+    ggplot(aes(x = -Depth,
+               y = Value)) +
+    geom_point(aes(color = Parameter, 
+                   size = Parameter)) +
+    scale_color_manual(values = c("InSitu_Chla" = "black",
+                                  "FP_Chla" = "#0072B2",
+                                  "Lab_Chla" = "#D55E00")) +
+    scale_size_manual(values = c("InSitu_Chla" = 1.5,
+                                 "FP_Chla" = 4,
+                                 "Lab_Chla" = 4)) +
+    coord_flip() +
+    theme_bw() +
+    ylab("Chlorophyll-a (ug/L)") +
+    xlab("Depth (m)")
+}
+```
+
+### geom_profile
+
+```{r geom-profile}
+#' Standardized Method for Plotting Profile Data
+#'
+#' @param .x a data frame
+#'
+#' @return a ggplot object.
+
+geom_profile <- function(.x) {
+  # When not specifying ggplot2::ggplot(), you must create a list of layers
+  list(
+    # Add a line representing profile data
+    # Color indicates when the value is interpolated
+    geom_line(data = .x, aes(color = Interpolated,
+                  group = Parameter),
+              size = 1),
+    # This provides tick marks on the axes to indicate where
+    # observed values fall (not-interpolated values).
+    # This is especially helpful when the observed values are low.
+    geom_rug(data = dplyr::filter(.x,
+                           Interpolated == FALSE,
+                           !is.na(Value)),
+             aes(color = Interpolated,
+                 group = Parameter)),
+    # Colors to be used on line and rug
+    scale_color_manual(values = c("TRUE" = "#E69F00", 
+                                  "FALSE" = "#56B4E9")),
+    # Nice theme
+    theme_bw(),
+    # Depth had to be specified as the x-value to get the plot to arrange
+    # itself correctly. coord_flip() puts depth on the y-axis.
+    coord_flip(),
+    # x-axis label
+    xlab("Depth (m)")
+  )
+  
+}
+
+
+```
+
+### chla_points
+
+```{r chla-points}
+#' Standardized Method for Plotting Chlorophyll-a Points
+#'
+#' @param .x a data frame
+#'
+#' @return a ggplot object.
+
+chla_points <- function(.x) {
+  # When not specifying ggplot2::ggplot(), you must create a list of layers
+  list(
+    # Scatter plot points
+    ggplot2::geom_point(data = .x,
+             ggplot2::aes(fill = Parameter),
+             shape = 21,
+             size = 4,
+             alpha = 0.9),
+    # Color the scatter plot points
+    ggplot2::scale_fill_manual(values = c("FP_Chla" = "#0072B2",
+                                          "Lab_Chla" = "#D55E00"))
+  )
+  
+}
+```
+
+### profile_plot
+```{r profile-plot-fun, fig.height=6}
+#' A Facet Wrapped Plot of Parameter Depth Profile
+#'
+#' @param .x a data frame.
+#' @param .event a string representing an event ID.
+#'
+#' @return a facet wrapped plot.
+
+profile_plot <- function(.x, .event) {
+  # Keep only rows with the specified Event_id (.event)
+ event_df <- .x %>%
+    dplyr::filter(Event_id %in% .event)
+ 
+ # Initiate plot
+ ggplot2::ggplot(data = event_df, 
+                 ggplot2::aes(y = Value,
+                              x = -Depth)) + 
+   # Add standardized profile layers
+   geom_profile(.x = event_df) +
+   # Create individual plots for each parameter
+   ggplot2::facet_wrap(~Event_id + Parameter,
+              ncol = 1,
+              scales = "free")
+}
+```
+
+### chla_interp_plot
+```{r chla-interp-plots-fun, fig.height=6, warning=FALSE}
+#' Chlorophyll-a Plots
+#'
+#' @param .x  a data frame.
+#' @param .event a single quoted event ID.
+#'
+#' @return a plot.
+
+# .x <- interp_df
+# .event <- "CGLT(1)_2019-09-05"
+chla_interp_plot <- function(.x, .event) {
+  # Wrangle the chla DF
+  chla_df <- chla_prep(.x = .x,
+                      .event = .event)
+  
+  # Initiate plot
+  ggplot2::ggplot(data = chla_df, 
+                  ggplot2::aes(y = Value,
+                               x = -Depth)) + 
+    # Apply the generic geom_profile layers
+  geom_profile(.x = chla_df %>% dplyr::filter(Parameter %in% "InSitu_Chla")) +
+    # Apply the generic chla_points
+  chla_points(.x = chla_df %>% dplyr::filter(!Parameter %in% "InSitu_Chla"))
+}
+```
+
 # Complete the Depth Profile
 
 
-```{r}
-# Apply depth_complete to both profile_df and discrete_df
-cdepth_df <- purrr::map(list(profile_df, discrete_df), function(df_i) {
-  depth_complete(.x = df_i,
-                 .depth = Depth,
-                 Event_id,
-                 Lake,
-                 Site,
-                 Date)
-}) %>% 
-  # Join/merge the results
-  # Makes a single DF containing both profile and discrete data
-  purrr::reduce(.f = full_join, 
-                by = c("Event_id",
-                       "Lake",
-                       "Site",
-                       "Date",
-                       "Depth")) %>% 
+```{r cdepth-df}
+# Apply depth_complete to the profile_df 
+cdepth_df <- depth_complete(.x = profile_df,
+                            .depth = Depth,
+                            Event_id,
+                            Lake,
+                            Site,
+                            Date) %>% 
   # Transform the data from a wide- to long-format
   tidyr::pivot_longer(
     # Pivot by all columns except the ones listed in !all_of()
@@ -170,12 +363,38 @@ cdepth_df <- purrr::map(list(profile_df, discrete_df), function(df_i) {
     # Values from each column, corresponding with the "Parameter" column,
     # will be placed in the "Value" column
     values_to = "Value"
-  )
+  ) %>% 
+  # Join the discrete data to the complete depth profile.
+  left_join(y = discrete_df,
+            by = c("Event_id",
+                     "Lake",
+                     "Site",
+                     "Date",
+                     "Depth"))
+```
+
+## Example Plots
+
+### Event ID: CGLT(3)_2019-06-06
+```{r example-chla-plot1}
+chla_plot(.x = cdepth_df,
+             .event = "CGLT(3)_2019-06-06")
+```
+
+### Event ID: CGLT(1)_2019-06-06
+```{r example-chla-plot2}
+chla_plot(.x = cdepth_df,
+             .event = "CGLT(1)_2019-06-06")
 ```
 
 # Interpolation
 
-```{r}
+1. The rows to the complete depth profile data frame (`cdepth_df`) are aggregated (grouped) by `Event_id` and `Parameter`. 
+2. The rows are then ordered by the `Event_id`, `Parameter`, and `Depth` values per group.
+3. The linear interpolation (see custom `interpolate()` function in the [Functions] Section)
+4. Ungroup the data to remove the data aggregation applied in step 1.
+5. Remove the current `Value` column and replace the `interp_value` column name with `Value`.
+```{r interp-df}
 interp_df <- cdepth_df %>% 
   # Aggregate the data by Event_id and Parameter
   dplyr::group_by(Event_id, Parameter) %>%
@@ -198,47 +417,44 @@ interp_df <- cdepth_df %>%
   dplyr::rename(Value = interp_value)
 ```
 
-```{r, fig.width=8, fig.height=40}
-#' A Facet Wrapped Plot of Parameter Depth Profile
-#'
-#' @param .x a data frame.
-#' @param .event a string representing an event ID.
-#'
-#' @return a facet wrapped plot.
+## Example Plots
 
-profile_plot <- function(.x, .event) {
-  interp_sub <- interp_df %>% 
-  filter(Event_id %in% .event) 
-  
-  interp_sub %>%
-  ggplot(aes(y = Value,
-             x = -Depth,
-             color = Interpolated,
-             fill = Interpolated,
-             group = Parameter)) +
-  geom_line(size = 1) +
-  # geom_point() +
-  theme_bw() +
-  coord_flip() +
-  scale_color_manual(values = c("TRUE" = "#E69F00", 
-                                "FALSE" = "#56B4E9")) +
-  # geom_point(data = filter(interp_sub, Interpolated == FALSE),
-  #            alpha = 0.5) +
-  geom_rug(data = filter(interp_sub,
-                         Interpolated == FALSE,
-                         !is.na(Value))) +
-  facet_wrap(~Event_id + Parameter,
-             scales = "free",
-             ncol = 1)
-}
-```
+The plots below provide a complete look at the depth profile by applying a linear-interpolation to the observed profile data.
 
-```{r}
+The tick marks on the axes indicate when an observed value is present in the depth profile. Although the line is colored to indicate when the value is observed (`Interpolated == FALSE`) and when the value is interpolated (`Interpolated == TRUE`), it can be difficult to see short strands of the line representing observed data--effectively making it appear as if there is no observed data present. The tick marks make it a little easier to identify when and where observed data is present.
 
+### Event ID: CGLT(3)_2019-06-06
+```{r example-profile-plot1, fig.height=40}
 profile_plot(.x = interp_df,
-             .event = .x)
+             .event = "CGLT(3)_2019-06-06")
 ```
 
+### Event ID: CGLT(1)_2019-06-06
+```{r example-profile-plot2, fig.height=40}
+profile_plot(.x = interp_df,
+             .event = "CGLT(1)_2019-06-06")
+```
+
+
+# Hybrid Plots
+
+These plots are a hybrid between the `profile_plots()` and the `chla_plots()` showing the interpolated depth profile and a scatter-plot of lab discrete points.
+
+The tick marks on the axes indicate when an observed value is present in the depth profile. Although the line is colored to indicate when the value is observed (`Interpolated == FALSE`) and when the value is interpolated (`Interpolated == TRUE`), it can be difficult to see short strands of the line representing observed data--effectively making it appear as if there is no observed data present. The tick marks make it a little easier to identify when and where observed data is present.
+
+## Example Plots
+
+### Event ID: CGLT(3)_2019-06-06
+```{r example-hybrid-plot1}
+chla_interp_plot(.x = interp_df,
+                 .event = "CGLT(3)_2019-06-06")
+```
+
+### Event ID: CGLT(1)_2019-06-06
+```{r example-hybrid-plot2}
+chla_interp_plot(.x = interp_df,
+                 .event = "CGLT(1)_2019-06-06")
+```
 
 
 
