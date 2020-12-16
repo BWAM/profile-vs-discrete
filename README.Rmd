@@ -134,16 +134,30 @@ interpolate <- function(.x, .y, .event, .quite = FALSE) {
     approx(x = .x,
            y = .y,
            xout = .x,
-           method = "linear")$y
+           method = "linear",
+           rule = 2)$y
   } else {
     if (!.quite) warning(
       # When using dplyr::across() to call this function, this message is less
       # informative. It will print ".x" instead of the column name representing .y.
-      paste0(unique(.event), "(", deparse(substitute(.y)),  ") \n",
-             "\t One of the supplied values had less than 2 values. \n",
-             "\t .x (", deparse(substitute(.x)), ") length = ", x_length, "\n",
-             "\t .y (", deparse(substitute(.y)), ") length = ", y_length, "\n",
-             "\t The original .y values will be returned. \n"))
+      paste0(
+        unique(.event),
+        "(",
+        deparse(substitute(.y)),
+        ") \n",
+        "\t One of the supplied values had less than 2 values. \n",
+        "\t .x (",
+        deparse(substitute(.x)),
+        ") length = ",
+        x_length,
+        "\n",
+        "\t .y (",
+        deparse(substitute(.y)),
+        ") length = ",
+        y_length,
+        "\n",
+        "\t The original .y values will be returned. \n"
+      ))
     .y
   }
 }

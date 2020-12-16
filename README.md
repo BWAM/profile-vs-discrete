@@ -132,16 +132,30 @@ interpolate <- function(.x, .y, .event, .quite = FALSE) {
     approx(x = .x,
            y = .y,
            xout = .x,
-           method = "linear")$y
+           method = "linear",
+           rule = 2)$y
   } else {
     if (!.quite) warning(
       # When using dplyr::across() to call this function, this message is less
       # informative. It will print ".x" instead of the column name representing .y.
-      paste0(unique(.event), "(", deparse(substitute(.y)),  ") \n",
-             "\t One of the supplied values had less than 2 values. \n",
-             "\t .x (", deparse(substitute(.x)), ") length = ", x_length, "\n",
-             "\t .y (", deparse(substitute(.y)), ") length = ", y_length, "\n",
-             "\t The original .y values will be returned. \n"))
+      paste0(
+        unique(.event),
+        "(",
+        deparse(substitute(.y)),
+        ") \n",
+        "\t One of the supplied values had less than 2 values. \n",
+        "\t .x (",
+        deparse(substitute(.x)),
+        ") length = ",
+        x_length,
+        "\n",
+        "\t .y (",
+        deparse(substitute(.y)),
+        ") length = ",
+        y_length,
+        "\n",
+        "\t The original .y values will be returned. \n"
+      ))
     .y
   }
 }
@@ -400,8 +414,6 @@ chla_plot(.x = cdepth_df,
 5.  Remove the current `Value` column and replace the `interp_value`
     column name with `Value`.
 
-<!-- end list -->
-
 ``` r
 interp_df <- cdepth_df %>% 
   # Aggregate the data by Event_id and Parameter
@@ -454,8 +466,6 @@ profile_plot(.x = interp_df,
              .event = "CGLT(1)_2019-06-06")
 ```
 
-    ## Warning: Removed 20 row(s) containing missing values (geom_path).
-
 ![](README_files/figure-gfm/example-profile-plot2-1.png)<!-- -->
 
 # Hybrid Plots
@@ -491,8 +501,6 @@ chla_interp_plot(.x = interp_df,
 chla_interp_plot(.x = interp_df,
                  .event = "CGLT(1)_2019-06-06")
 ```
-
-    ## Warning: Removed 2 row(s) containing missing values (geom_path).
 
     ## Warning: Removed 558 rows containing missing values (geom_point).
 
