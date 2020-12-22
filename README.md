@@ -103,13 +103,29 @@ Standardized methods for wrangling data and creating plots.
 #' @export
 
 depth_complete <- function(.x, .depth, ...) {
-  .x %>% 
-  dplyr::group_by(...) %>% 
-  tidyr::complete({{.depth}} := seq(from = 0,
-                              to = max({{.depth}},
-                                       na.rm = TRUE),
-                              by = 0.1)) %>% 
+  dots <- rlang::enquos(...)
+
+  prep_df <- .x %>% 
+    # tidyr::unite(uid, !!!dots, remove = FALSE) %>%
+    dplyr::group_by(!!!dots) %>% 
+    dplyr::mutate(max_val = max({{.depth}}, na.rm = TRUE),
+                  {{.depth}} := as.character({{.depth}})) %>% 
     dplyr::ungroup()
+  
+  expand_df <- prep_df %>% 
+    tidyr::expand(nesting(!!!select(., !!!dots),
+                          max_val),
+                  {{.depth}} :=  full_seq(as.numeric({{.depth}}),
+                                          0.1)) %>% 
+    filter({{.depth}} <= max_val) %>% 
+    mutate({{.depth}} := as.character({{.depth}}))
+  
+  
+  final_df <- dplyr::full_join(prep_df, expand_df,
+                               #c(id, rlang::as_name({{.depth}}))) %>%
+                               by = purrr::map_chr(c(dots, rlang::enquo(.depth)),
+                                                     rlang::as_label)) %>%   
+    dplyr::mutate({{.depth}} := as.numeric({{.depth}}))
 }
 ```
 
@@ -387,7 +403,7 @@ chla_plot(.x = cdepth_df,
              .event = "CGLT(3)_2019-06-06")
 ```
 
-    ## Warning: Removed 138 rows containing missing values (geom_point).
+    ## Warning: Removed 126 rows containing missing values (geom_point).
 
 ![](README_files/figure-gfm/example-chla-plot1-1.png)<!-- -->
 
@@ -398,7 +414,7 @@ chla_plot(.x = cdepth_df,
              .event = "CGLT(1)_2019-06-06")
 ```
 
-    ## Warning: Removed 772 rows containing missing values (geom_point).
+    ## Warning: Removed 703 rows containing missing values (geom_point).
 
 ![](README_files/figure-gfm/example-chla-plot2-1.png)<!-- -->
 
@@ -491,7 +507,7 @@ chla_interp_plot(.x = interp_df,
                  .event = "CGLT(3)_2019-06-06")
 ```
 
-    ## Warning: Removed 99 rows containing missing values (geom_point).
+    ## Warning: Removed 91 rows containing missing values (geom_point).
 
 ![](README_files/figure-gfm/example-hybrid-plot1-1.png)<!-- -->
 
@@ -502,6 +518,6 @@ chla_interp_plot(.x = interp_df,
                  .event = "CGLT(1)_2019-06-06")
 ```
 
-    ## Warning: Removed 558 rows containing missing values (geom_point).
+    ## Warning: Removed 512 rows containing missing values (geom_point).
 
 ![](README_files/figure-gfm/example-hybrid-plot2-1.png)<!-- -->

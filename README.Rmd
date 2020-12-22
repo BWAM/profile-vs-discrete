@@ -105,14 +105,31 @@ Standardized methods for wrangling data and creating plots.
 #' @export
 
 depth_complete <- function(.x, .depth, ...) {
-  .x %>% 
-  dplyr::group_by(...) %>% 
-  tidyr::complete({{.depth}} := seq(from = 0,
-                              to = max({{.depth}},
-                                       na.rm = TRUE),
-                              by = 0.1)) %>% 
+  dots <- rlang::enquos(...)
+
+  prep_df <- .x %>% 
+    # tidyr::unite(uid, !!!dots, remove = FALSE) %>%
+    dplyr::group_by(!!!dots) %>% 
+    dplyr::mutate(max_val = max({{.depth}}, na.rm = TRUE),
+                  {{.depth}} := as.character({{.depth}})) %>% 
     dplyr::ungroup()
+  
+  expand_df <- prep_df %>% 
+    tidyr::expand(nesting(!!!select(., !!!dots),
+                          max_val),
+                  {{.depth}} :=  full_seq(as.numeric({{.depth}}),
+                                          0.1)) %>% 
+    filter({{.depth}} <= max_val) %>% 
+    mutate({{.depth}} := as.character({{.depth}}))
+  
+  
+  final_df <- dplyr::full_join(prep_df, expand_df,
+                               #c(id, rlang::as_name({{.depth}}))) %>%
+                               by = purrr::map_chr(c(dots, rlang::enquo(.depth)),
+                                                     rlang::as_label)) %>%   
+    dplyr::mutate({{.depth}} := as.numeric({{.depth}}))
 }
+
 ```
 
 ### Interplolate
